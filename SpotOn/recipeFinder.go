@@ -1,7 +1,8 @@
 package main
 
 import (
-	"SpotOn/proxy"
+	"SpotOn/controllers"
+	"SpotOn/models"
 	"fmt"
 	"github.com/spf13/cobra"
 	"os"
@@ -49,71 +50,43 @@ func getIngredientsAndRecipesNumber() {
 	}
 }
 
-// creates
-func createIngredientsUrlLink() string {
-	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=8da80267f2bc4e3e81762e459bc4590d&ingredients="
+func displayAvailableRecipes(recipes []models.Recipe) {
 
-	for i := 0; i < len(ingredientsList); i++ {
-		url += ingredientsList[i]
+	println("\nThere are available recipes to prepare from provided ingredients:\n")
 
-		if i != len(ingredientsList)-1 {
-			url += ","
-		}
-	}
-
-	url = url + "&number=" + strconv.Itoa(numberOfRecipes)
-
-	return url
-}
-
-func main() {
-	recipesProxy := proxy.RecipesProxy{}
-
-	getIngredientsAndRecipesNumber()
-
-	for i := 0; i < len(ingredientsList); i++ {
-		println(ingredientsList[i])
-	}
-	println(numberOfRecipes)
-
-	url := createIngredientsUrlLink()
-
-	recipes, err := recipesProxy.GetRecipesByIngredients(url)
-	if err != nil {
-		return
-	}
-
-	for _, recipe := range *recipes {
-		println("----------------------------")
-		println("Name: " + recipe.Title)
+	for i, recipe := range recipes {
+		println("-------------- " + strconv.Itoa(i) + " --------------")
+		println("Name: " + recipe.Name)
 		print("Present ingredients: ")
 
-		for _, presentIngredient := range recipe.UsedIngredients {
-			print(presentIngredient.Name + ", ")
+		for _, presentIngredient := range recipe.PresentIngredients {
+			print(presentIngredient + ", ")
 		}
 		println()
 
 		print("Missing ingredients: ")
 
-		for _, missedIngredient := range recipe.MissedIngredients {
-			print(missedIngredient.Name + ", ")
+		for _, missedIngredient := range recipe.MissingIngredients {
+			print(missedIngredient + ", ")
 		}
 		println()
 
-		recipeDetails, err := recipesProxy.GetNutritionByRecipeId(recipe.ID)
-
-		if err != nil {
-			return
-		}
-
-		for _, nutrient := range recipeDetails.Nutrients {
-			if nutrient.Name == "Carbohydrates" {
-				fmt.Printf("Carbs: %.2f %s\n", nutrient.Amount, nutrient.Unit)
-			} else if nutrient.Name == "Protein" {
-				fmt.Printf("Proteins: %.2f %s\n", nutrient.Amount, nutrient.Unit)
-			} else if nutrient.Name == "Calories" {
-				fmt.Printf("Calories: %.2f %s\n", nutrient.Amount, nutrient.Unit)
-			}
-		}
+		println("Proteins: " + recipe.Proteins)
+		println("Calories: " + recipe.Calories)
+		fmt.Printf("Carbs: %s\n\n", recipe.Carbs)
 	}
+}
+
+func main() {
+	recipeController := controllers.RecipesController{}
+
+	getIngredientsAndRecipesNumber()
+
+	recipes, err := recipeController.GetRecipesByIngredients(ingredientsList, numberOfRecipes)
+	if err != nil {
+		return
+	}
+
+	displayAvailableRecipes(recipes)
+
 }
