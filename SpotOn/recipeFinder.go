@@ -4,7 +4,9 @@ import (
 	"SpotOn/controllers"
 	"SpotOn/models"
 	"fmt"
+	"github.com/labstack/echo/v4"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 	"os"
 	"strconv"
 	"strings"
@@ -77,7 +79,21 @@ func displayAvailableRecipes(recipes []models.Recipe) {
 	}
 }
 
+func runDB() *gorm.DB {
+	e := echo.New()
+	db := models.Connect()
+
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("db", db)
+			return next(c)
+		}
+	})
+	return nil
+}
+
 func main() {
+
 	recipeController := controllers.RecipesController{}
 
 	getIngredientsAndRecipesNumber()
