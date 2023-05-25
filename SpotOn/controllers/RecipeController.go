@@ -13,7 +13,7 @@ import (
 type RecipesController struct {
 }
 
-func Connect() *gorm.DB {
+func ConnectToDatabase() *gorm.DB {
 	db, err := gorm.Open(sqlite.Open("test.db"))
 
 	if err != nil {
@@ -31,15 +31,7 @@ func Connect() *gorm.DB {
 func ifListContainsSubstring(ingredientsList []string, presentIngredients []models.PresentIngredient) bool {
 	presentnNr := 0
 
-	//print("List: ")
-	//for _, i := range ingredientsList {
-	//print(i + ",")
-	//}
-
-	//print("\nPresentIngrd: ")
-
 	for _, presentIngredient := range presentIngredients {
-		//print(presentIngredient.Name + ",")
 		for _, ingredient := range ingredientsList {
 			if strings.Contains(presentIngredient.Name, ingredient) {
 				presentnNr += 1
@@ -48,11 +40,7 @@ func ifListContainsSubstring(ingredientsList []string, presentIngredients []mode
 		}
 	}
 
-	println()
-
-	if presentnNr < len(presentIngredients) {
-		return false
-	} else {
+	if presentnNr == len(presentIngredients) {
 		nr := 0
 		for _, ingredient := range ingredientsList {
 			for _, presentIngredient := range presentIngredients {
@@ -63,15 +51,15 @@ func ifListContainsSubstring(ingredientsList []string, presentIngredients []mode
 			}
 		}
 
-		if nr < len(ingredientsList) {
-			return false
-		} else {
+		if nr == len(ingredientsList) {
 			return true
 		}
 	}
+
+	return false
 }
 
-func searchDatabase(ingredientsList []string, numberOfRecipes int, db *gorm.DB) []models.RecipeDB {
+func getRecipesFromDatabase(ingredientsList []string, db *gorm.DB) []models.RecipeDB {
 	var db_recipes []models.RecipeDB
 
 	query := db.Table("recipes").
@@ -88,44 +76,101 @@ func searchDatabase(ingredientsList []string, numberOfRecipes int, db *gorm.DB) 
 
 	var final_recipes []models.RecipeDB
 
-	for _, recipe := range db_recipes {
-		println("----------------------------")
-		println("Name: " + recipe.Name)
-		print("Present ingredients: ")
-
-		for _, presentIngredient := range recipe.PresentIngredients {
-			print(presentIngredient.Name + ", ")
-		}
-		println()
-
-		print("Missing ingredients: ")
-
-		for _, missedIngredient := range recipe.MissingIngredients {
-			print(missedIngredient.Name + ", ")
-		}
-		println()
-
-		println("Proteins: " + recipe.Proteins)
-		println("Calories: " + recipe.Calories)
-		fmt.Printf("Carbs: %s\n\n", recipe.Carbs)
-	}
-
 	if len(db_recipes) > 0 {
-		println("-- PRZED: " + strconv.Itoa(len(db_recipes)))
-		for _, recipe := range db_recipes {
-			println("*****")
+		println("przed: " + strconv.Itoa(len(db_recipes)))
 
+		for _, recipe := range db_recipes {
 			if ifListContainsSubstring(ingredientsList, recipe.PresentIngredients) {
 				final_recipes = append(final_recipes, recipe)
 			}
 		}
 
-		println("-- PO: " + strconv.Itoa(len(final_recipes)))
+		println("Po: " + strconv.Itoa(len(final_recipes)))
 
 		return final_recipes
 	}
 
-	return db_recipes
+	return nil
+}
+
+func parseRecipeDBToRecipe(recipeDB models.RecipeDB) models.Recipe {
+	newRecipe := models.Recipe{}
+	newRecipe.Name = recipeDB.Name
+	newRecipe.Carbs = recipeDB.Carbs
+	newRecipe.Proteins = recipeDB.Proteins
+	newRecipe.Calories = recipeDB.Calories
+
+	for _, presentRecipe := range recipeDB.PresentIngredients {
+		newRecipe.PresentIngredients = append(newRecipe.PresentIngredients, presentRecipe.Name)
+	}
+
+	for _, missingRecipe := range recipeDB.MissingIngredients {
+		newRecipe.MissingIngredients = append(newRecipe.MissingIngredients, missingRecipe.Name)
+	}
+
+	return newRecipe
+}
+
+func parseRecipeExtendedToRecipe(recipeExtended models.RecipeExtended) models.Recipe {
+	var newRecipe models.Recipe
+
+	recipesProxy := proxy.RecipesProxy{}
+	newRecipe.Name = recipeExtended.Title
+	recipeDetails, err := recipesProxy.GetNutritionByRecipeId(recipeExtended.ID)
+
+	if err != nil {
+		return models.Recipe{}
+	}
+
+	for _, nutrient := range recipeDetails.Nutrients {
+		if nutrient.Name == "Carbohydrates" {
+			newRecipe.Carbs = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
+		} else if nutrient.Name == "Protein" {
+			newRecipe.Proteins = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
+		} else if nutrient.Name == "Calories" {
+			newRecipe.Calories = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
+		}
+	}
+
+	for _, presentIngredient := range recipeExtended.UsedIngredients {
+		newRecipe.PresentIngredients = append(newRecipe.PresentIngredients, presentIngredient.Name)
+	}
+
+	for _, missedIngredient := range recipeExtended.MissedIngredients {
+		newRecipe.MissingIngredients = append(newRecipe.MissingIngredients, missedIngredient.Name)
+	}
+
+	return newRecipe
+}
+
+func addRecipeToDatabase(recipe models.Recipe, recipeExtended models.RecipeExtended, db *gorm.DB) {
+	tx := db.Begin()
+
+	db_recipe := models.RecipeDB{
+		Name:     recipe.Name,
+		Carbs:    recipe.Carbs,
+		Proteins: recipe.Proteins,
+		Calories: recipe.Calories,
+	}
+
+	tx.Create(&db_recipe)
+	for _, presentIngredient := range recipe.PresentIngredients {
+		ingredient := models.PresentIngredient{
+			RecipeID: db_recipe.ID,
+			Name:     presentIngredient,
+		}
+		tx.Create(&ingredient)
+	}
+
+	for _, missedIngredient := range recipeExtended.MissedIngredients {
+		ingredient := models.MissingIngredient{
+			RecipeID: db_recipe.ID,
+			Name:     missedIngredient.Name,
+		}
+		tx.Create(&ingredient)
+	}
+
+	tx.Commit()
 }
 
 func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, numberOfRecipes int) ([]models.Recipe, error) {
@@ -133,25 +178,19 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 	var recipes []models.Recipe
 	var newRecipe models.Recipe
 
-	db := Connect()
+	db := ConnectToDatabase()
+	db_recipes := getRecipesFromDatabase(ingredientsList, db)
 
-	db_recipes := searchDatabase(ingredientsList, numberOfRecipes, db)
+	if len(db_recipes) >= numberOfRecipes {
+		println("-- biore z bazy --")
 
-	if len(db_recipes) == numberOfRecipes {
-		println("cos mam! : " + db_recipes[0].Name + ", " + db_recipes[0].Carbs + ", " + db_recipes[0].Proteins + ", " + db_recipes[0].Calories + ", ")
-
-		for _, ing := range db_recipes[0].PresentIngredients {
-			println("pres: " + ing.Name)
+		for nr := 0; nr < numberOfRecipes; nr++ {
+			recipes = append(recipes, parseRecipeDBToRecipe(db_recipes[nr]))
 		}
 
-		for _, ing := range db_recipes[0].MissingIngredients {
-			println("miss: " + ing.Name)
-		}
-
-		return nil, nil
+		return recipes, nil
 
 	} else {
-
 		println("--- pobieram nowe -- ")
 
 		url := createIngredientsUrlLink(ingredientsList, numberOfRecipes)
@@ -162,60 +201,9 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 		}
 
 		for _, recipe := range *recipesExtended {
-			newRecipe = models.Recipe{}
-			newRecipe.Name = recipe.Title
-
-			recipeDetails, err := recipesProxy.GetNutritionByRecipeId(recipe.ID)
-
-			if err != nil {
-				return nil, err
-			}
-
-			for _, nutrient := range recipeDetails.Nutrients {
-				println("NUTRIENT: " + nutrient.Name)
-				if nutrient.Name == "Carbohydrates" {
-					newRecipe.Carbs = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
-				} else if nutrient.Name == "Protein" {
-					newRecipe.Proteins = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
-				} else if nutrient.Name == "Calories" {
-					newRecipe.Calories = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
-				}
-			}
-
-			tx := db.Begin()
-
-			db_recipe := models.RecipeDB{
-				Name:     newRecipe.Name,
-				Carbs:    newRecipe.Carbs,
-				Proteins: newRecipe.Proteins,
-				Calories: newRecipe.Calories,
-			}
-
-			tx.Create(&db_recipe)
-
-			for _, presentIngredient := range recipe.UsedIngredients {
-				newRecipe.PresentIngredients = append(newRecipe.PresentIngredients, presentIngredient.Name)
-
-				ingredient := models.PresentIngredient{
-					RecipeID: db_recipe.ID,
-					Name:     presentIngredient.Name,
-				}
-				tx.Create(&ingredient)
-			}
-
-			for _, missedIngredient := range recipe.MissedIngredients {
-				newRecipe.MissingIngredients = append(newRecipe.MissingIngredients, missedIngredient.Name)
-
-				ingredient := models.MissingIngredient{
-					RecipeID: db_recipe.ID,
-					Name:     missedIngredient.Name,
-				}
-				tx.Create(&ingredient)
-			}
-
-			tx.Commit()
+			newRecipe = parseRecipeExtendedToRecipe(recipe)
 			recipes = append(recipes, newRecipe)
-
+			addRecipeToDatabase(newRecipe, recipe, db)
 		}
 
 		return recipes, nil
