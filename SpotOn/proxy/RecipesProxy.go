@@ -40,7 +40,7 @@ func (rp *RecipesProxy) GetRecipesByIngredients(url string) (*[]models.RecipeExt
 }
 
 func (rp *RecipesProxy) GetNutritionByRecipeId(id int) (*models.RecipeDetails, error) {
-	url := "https://api.spoonacular.com/recipes/" + strconv.Itoa(id) + "/nutritionWidget.json?apiKey=8da80267f2bc4e3e81762e459bc4590d"
+	url := "https://api.spoonacular.com/recipes/" + strconv.Itoa(id) + "/nutritionWidget.json?apiKey=123" //f661c070cf4f4ce480a75ff371a12b92"
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

@@ -11,14 +11,9 @@ import (
 )
 
 type RecipesController struct {
-	//DB *gorm.DB
 }
 
-func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, numberOfRecipes int) ([]models.Recipe, error) {
-	recipesProxy := proxy.RecipesProxy{}
-	var recipes []models.Recipe
-	var newRecipe models.Recipe
-
+func Connect() *gorm.DB {
 	db, err := gorm.Open(sqlite.Open("test.db"))
 
 	if err != nil {
@@ -27,36 +22,122 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 
 	err = db.AutoMigrate(&models.RecipeDB{}, &models.PresentIngredient{}, &models.MissingIngredient{})
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
+	return db
+}
+
+func ifListContainsSubstring(ingredientsList []string, presentIngredients []models.PresentIngredient) bool {
+	presentnNr := 0
+
+	//print("List: ")
+	//for _, i := range ingredientsList {
+	//print(i + ",")
+	//}
+
+	//print("\nPresentIngrd: ")
+
+	for _, presentIngredient := range presentIngredients {
+		//print(presentIngredient.Name + ",")
+		for _, ingredient := range ingredientsList {
+			if strings.Contains(presentIngredient.Name, ingredient) {
+				presentnNr += 1
+				break
+			}
+		}
+	}
+
+	println()
+
+	if presentnNr < len(presentIngredients) {
+		return false
+	} else {
+		nr := 0
+		for _, ingredient := range ingredientsList {
+			for _, presentIngredient := range presentIngredients {
+				if strings.Contains(presentIngredient.Name, ingredient) {
+					nr += 1
+					break
+				}
+			}
+		}
+
+		if nr < len(ingredientsList) {
+			return false
+		} else {
+			return true
+		}
+	}
+}
+
+func searchDatabase(ingredientsList []string, numberOfRecipes int, db *gorm.DB) []models.RecipeDB {
 	var db_recipes []models.RecipeDB
 
 	query := db.Table("recipes").
 		Preload("PresentIngredients").
 		Preload("MissingIngredients").
 		Joins("INNER JOIN present_ingredients ON present_ingredients.recipe_id = recipes.id").
-		Where("present_ingredients.name LIKE ?", ingredientsList[0])
+		Where("present_ingredients.name LIKE ?", "%"+ingredientsList[0]+"%")
 
-	// Append additional LIKE conditions for each ingredient
 	for i := 1; i < len(ingredientsList); i++ {
-		query = query.Or("present_ingredients.name LIKE ?", ingredientsList[i])
+		query = query.Or("present_ingredients.name LIKE ?", "%"+ingredientsList[i]+"%")
 	}
 
-	query = query.Limit(numberOfRecipes)
+	query = query.Distinct().Find(&db_recipes)
 
-	// Execute the query
-	result := query.Find(&db_recipes)
+	var final_recipes []models.RecipeDB
 
-	//db_recipes := []models.RecipeDB{}
-	//db.Preload("PresentIngredients", "MissingIngredients").
-	//	Where("present_ingredients.name LIKE ?", "%"+ingredientsList[0]+"%")
-	//for i := 1; i < len(ingredientsList); i++ {
-	//	db.Or("present_ingredients.name LIKE ?", "%"+ingredientsList[i]+"%")
-	//}
-	//result := db.Find(&db_recipes)
+	for _, recipe := range db_recipes {
+		println("----------------------------")
+		println("Name: " + recipe.Name)
+		print("Present ingredients: ")
 
-	if result.RowsAffected == int64(numberOfRecipes) {
+		for _, presentIngredient := range recipe.PresentIngredients {
+			print(presentIngredient.Name + ", ")
+		}
+		println()
+
+		print("Missing ingredients: ")
+
+		for _, missedIngredient := range recipe.MissingIngredients {
+			print(missedIngredient.Name + ", ")
+		}
+		println()
+
+		println("Proteins: " + recipe.Proteins)
+		println("Calories: " + recipe.Calories)
+		fmt.Printf("Carbs: %s\n\n", recipe.Carbs)
+	}
+
+	if len(db_recipes) > 0 {
+		println("-- PRZED: " + strconv.Itoa(len(db_recipes)))
+		for _, recipe := range db_recipes {
+			println("*****")
+
+			if ifListContainsSubstring(ingredientsList, recipe.PresentIngredients) {
+				final_recipes = append(final_recipes, recipe)
+			}
+		}
+
+		println("-- PO: " + strconv.Itoa(len(final_recipes)))
+
+		return final_recipes
+	}
+
+	return db_recipes
+}
+
+func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, numberOfRecipes int) ([]models.Recipe, error) {
+	recipesProxy := proxy.RecipesProxy{}
+	var recipes []models.Recipe
+	var newRecipe models.Recipe
+
+	db := Connect()
+
+	db_recipes := searchDatabase(ingredientsList, numberOfRecipes, db)
+
+	if len(db_recipes) == numberOfRecipes {
 		println("cos mam! : " + db_recipes[0].Name + ", " + db_recipes[0].Carbs + ", " + db_recipes[0].Proteins + ", " + db_recipes[0].Calories + ", ")
 
 		for _, ing := range db_recipes[0].PresentIngredients {
@@ -71,7 +152,7 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 
 	} else {
 
-		println("elo")
+		println("--- pobieram nowe -- ")
 
 		url := createIngredientsUrlLink(ingredientsList, numberOfRecipes)
 
@@ -91,6 +172,7 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 			}
 
 			for _, nutrient := range recipeDetails.Nutrients {
+				println("NUTRIENT: " + nutrient.Name)
 				if nutrient.Name == "Carbohydrates" {
 					newRecipe.Carbs = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
 				} else if nutrient.Name == "Protein" {
@@ -142,7 +224,7 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 
 // creates url for getting recipes from ingredients list
 func createIngredientsUrlLink(ingredientsList []string, numberOfRecipes int) string {
-	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=8da80267f2bc4e3e81762e459bc4590d&ingredients="
+	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=f661c070cf4f4ce480a75ff371a12b92&ingredients="
 
 	for _, ingredient := range ingredientsList {
 		url += ingredient + ","
