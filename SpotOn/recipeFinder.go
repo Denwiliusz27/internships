@@ -39,7 +39,7 @@ var (
 	}
 )
 
-// parse ingredints list and number of recipes
+// getIngredientsAndRecipesNumber sets ingredients list and number of recipes from arguments
 func getIngredientsAndRecipesNumber() {
 	rootCmd.Flags().StringVar(&ingredientsRaw, "ingredients", "", "Comma-separated list of ingredients")
 	rootCmd.Flags().IntVar(&numberOfRecipes, "numberOfRecipes", 0, "Maximum number of recipes")
@@ -50,6 +50,7 @@ func getIngredientsAndRecipesNumber() {
 	}
 }
 
+// displayAvailableRecipes displays recipes for provided ingredients
 func displayAvailableRecipes(recipes []models.Recipe) {
 	println("\nThere are available recipes to prepare from provided ingredients:\n")
 

@@ -11,7 +11,7 @@ import (
 type RecipesProxy struct {
 }
 
-func (rp *RecipesProxy) GetRecipesByIngredients(url string) (*[]models.RecipeExtended, error) {
+func (rp *RecipesProxy) GetRecipesInfoByIngredients(url string) (*[]models.RecipeExtended, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (rp *RecipesProxy) GetRecipesByIngredients(url string) (*[]models.RecipeExt
 	return &recipes, nil
 }
 
-func (rp *RecipesProxy) GetNutritionByRecipeId(id int) (*models.RecipeDetails, error) {
+func (rp *RecipesProxy) GetNutritionInfoByRecipeId(id int) (*models.RecipeNutrientInfo, error) {
 	url := "https://api.spoonacular.com/recipes/" + strconv.Itoa(id) + "/nutritionWidget.json?apiKey=123" //f661c070cf4f4ce480a75ff371a12b92"
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -59,7 +59,7 @@ func (rp *RecipesProxy) GetNutritionByRecipeId(id int) (*models.RecipeDetails, e
 		return nil, err
 	}
 
-	var recipeDetails models.RecipeDetails
+	var recipeDetails models.RecipeNutrientInfo
 	err = json.Unmarshal(body, &recipeDetails)
 
 	if err != nil {

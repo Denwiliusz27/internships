@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -13,8 +16,55 @@ import (
 type RecipesController struct {
 }
 
+// GetRecipesByIngredients returns list of recipes for provided ingredients
+func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, numberOfRecipes int) ([]models.Recipe, error) {
+	recipesProxy := proxy.RecipesProxy{}
+	var recipes []models.Recipe
+	var newRecipe models.Recipe
+	db := ConnectToDatabase()
+
+	db_recipes := getRecipesByIngredientsFromDatabase(ingredientsList, db)
+
+	// if recipes are in database
+	if len(db_recipes) >= numberOfRecipes {
+		println("-- biore z bazy --")
+
+		for nr := 0; nr < numberOfRecipes; nr++ {
+			recipes = append(recipes, parseRecipeDBToRecipe(db_recipes[nr]))
+		}
+
+		return recipes, nil
+
+	} else { // if recipes are not in database
+		println("--- pobieram nowe -- ")
+
+		url := createIngredientsUrlLink(ingredientsList, numberOfRecipes)
+
+		recipesExtended, err := recipesProxy.GetRecipesInfoByIngredients(url)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, recipe := range *recipesExtended {
+			newRecipe = parseRecipeExtendedToRecipe(recipe)
+			recipes = append(recipes, newRecipe)
+			addRecipeToDatabase(newRecipe, recipe, db)
+		}
+
+		return recipes, nil
+	}
+}
+
+// ConnectToDatabase connects to database
 func ConnectToDatabase() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open("test.db"))
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{
+		Logger: logger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			logger.Config{
+				IgnoreRecordNotFoundError: true,
+				ParameterizedQueries:      true,
+				Colorful:                  false,
+			})})
 
 	if err != nil {
 		panic("Failed to connect with database")
@@ -28,7 +78,22 @@ func ConnectToDatabase() *gorm.DB {
 	return db
 }
 
-func ifListContainsSubstring(ingredientsList []string, presentIngredients []models.PresentIngredient) bool {
+// createIngredientsUrlLink creates url link for getting recipes from ingredients list
+func createIngredientsUrlLink(ingredientsList []string, numberOfRecipes int) string {
+	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=f661c070cf4f4ce480a75ff371a12b92&ingredients="
+
+	for _, ingredient := range ingredientsList {
+		url += ingredient + ","
+	}
+
+	url = strings.TrimSuffix(url, ",")
+	url = url + "&number=" + strconv.Itoa(numberOfRecipes)
+
+	return url
+}
+
+// presentIngredientsExualsIngredients checks if present ingredients list is same as ingredients list
+func presentIngredientsExualsIngredients(ingredientsList []string, presentIngredients []models.PresentIngredient) bool {
 	presentnNr := 0
 
 	for _, presentIngredient := range presentIngredients {
@@ -59,8 +124,10 @@ func ifListContainsSubstring(ingredientsList []string, presentIngredients []mode
 	return false
 }
 
-func getRecipesFromDatabase(ingredientsList []string, db *gorm.DB) []models.RecipeDB {
+// getRecipesByIngredientsFromDatabase returns list of recipes for ingredients list
+func getRecipesByIngredientsFromDatabase(ingredientsList []string, db *gorm.DB) []models.RecipeDB {
 	var db_recipes []models.RecipeDB
+	var final_recipes []models.RecipeDB
 
 	query := db.Table("recipes").
 		Preload("PresentIngredients").
@@ -74,18 +141,12 @@ func getRecipesFromDatabase(ingredientsList []string, db *gorm.DB) []models.Reci
 
 	query = query.Distinct().Find(&db_recipes)
 
-	var final_recipes []models.RecipeDB
-
 	if len(db_recipes) > 0 {
-		println("przed: " + strconv.Itoa(len(db_recipes)))
-
 		for _, recipe := range db_recipes {
-			if ifListContainsSubstring(ingredientsList, recipe.PresentIngredients) {
+			if presentIngredientsExualsIngredients(ingredientsList, recipe.PresentIngredients) {
 				final_recipes = append(final_recipes, recipe)
 			}
 		}
-
-		println("Po: " + strconv.Itoa(len(final_recipes)))
 
 		return final_recipes
 	}
@@ -93,6 +154,7 @@ func getRecipesFromDatabase(ingredientsList []string, db *gorm.DB) []models.Reci
 	return nil
 }
 
+// parseRecipeDBToRecipe creates Recipe object from RecipeDB object from database
 func parseRecipeDBToRecipe(recipeDB models.RecipeDB) models.Recipe {
 	newRecipe := models.Recipe{}
 	newRecipe.Name = recipeDB.Name
@@ -111,18 +173,19 @@ func parseRecipeDBToRecipe(recipeDB models.RecipeDB) models.Recipe {
 	return newRecipe
 }
 
+// parseRecipeExtendedToRecipe creates Recipe object from RecipeExtended object
 func parseRecipeExtendedToRecipe(recipeExtended models.RecipeExtended) models.Recipe {
 	var newRecipe models.Recipe
-
 	recipesProxy := proxy.RecipesProxy{}
-	newRecipe.Name = recipeExtended.Title
-	recipeDetails, err := recipesProxy.GetNutritionByRecipeId(recipeExtended.ID)
 
+	recipeNutrientsInfo, err := recipesProxy.GetNutritionInfoByRecipeId(recipeExtended.ID)
 	if err != nil {
 		return models.Recipe{}
 	}
 
-	for _, nutrient := range recipeDetails.Nutrients {
+	newRecipe.Name = recipeExtended.Title
+
+	for _, nutrient := range recipeNutrientsInfo.Nutrients {
 		if nutrient.Name == "Carbohydrates" {
 			newRecipe.Carbs = fmt.Sprintf("%.2f %s", nutrient.Amount, nutrient.Unit)
 		} else if nutrient.Name == "Protein" {
@@ -143,83 +206,48 @@ func parseRecipeExtendedToRecipe(recipeExtended models.RecipeExtended) models.Re
 	return newRecipe
 }
 
+// addRecipeToDatabase adds recipe and corresponding ingredients to database
 func addRecipeToDatabase(recipe models.Recipe, recipeExtended models.RecipeExtended, db *gorm.DB) {
-	tx := db.Begin()
+	var db_recipe models.RecipeDB
+	var exist bool
 
-	db_recipe := models.RecipeDB{
-		Name:     recipe.Name,
-		Carbs:    recipe.Carbs,
-		Proteins: recipe.Proteins,
-		Calories: recipe.Calories,
+	err := db.Model(models.RecipeDB{}).
+		Where("name = ? ", recipe.Name).
+		Find(&exist).
+		Error
+
+	if err != nil {
+		return
 	}
 
-	tx.Create(&db_recipe)
-	for _, presentIngredient := range recipe.PresentIngredients {
-		ingredient := models.PresentIngredient{
-			RecipeID: db_recipe.ID,
-			Name:     presentIngredient,
+	if !exist {
+		tx := db.Begin()
+
+		db_recipe = models.RecipeDB{
+			Name:     recipe.Name,
+			Carbs:    recipe.Carbs,
+			Proteins: recipe.Proteins,
+			Calories: recipe.Calories,
 		}
-		tx.Create(&ingredient)
+
+		tx.Create(&db_recipe)
+
+		for _, presentIngredient := range recipe.PresentIngredients {
+			ingredient := models.PresentIngredient{
+				RecipeID: db_recipe.ID,
+				Name:     presentIngredient,
+			}
+			tx.Create(&ingredient)
+		}
+
+		for _, missedIngredient := range recipeExtended.MissedIngredients {
+			ingredient := models.MissingIngredient{
+				RecipeID: db_recipe.ID,
+				Name:     missedIngredient.Name,
+			}
+			tx.Create(&ingredient)
+		}
+
+		tx.Commit()
 	}
-
-	for _, missedIngredient := range recipeExtended.MissedIngredients {
-		ingredient := models.MissingIngredient{
-			RecipeID: db_recipe.ID,
-			Name:     missedIngredient.Name,
-		}
-		tx.Create(&ingredient)
-	}
-
-	tx.Commit()
-}
-
-func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, numberOfRecipes int) ([]models.Recipe, error) {
-	recipesProxy := proxy.RecipesProxy{}
-	var recipes []models.Recipe
-	var newRecipe models.Recipe
-
-	db := ConnectToDatabase()
-	db_recipes := getRecipesFromDatabase(ingredientsList, db)
-
-	if len(db_recipes) >= numberOfRecipes {
-		println("-- biore z bazy --")
-
-		for nr := 0; nr < numberOfRecipes; nr++ {
-			recipes = append(recipes, parseRecipeDBToRecipe(db_recipes[nr]))
-		}
-
-		return recipes, nil
-
-	} else {
-		println("--- pobieram nowe -- ")
-
-		url := createIngredientsUrlLink(ingredientsList, numberOfRecipes)
-
-		recipesExtended, err := recipesProxy.GetRecipesByIngredients(url)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, recipe := range *recipesExtended {
-			newRecipe = parseRecipeExtendedToRecipe(recipe)
-			recipes = append(recipes, newRecipe)
-			addRecipeToDatabase(newRecipe, recipe, db)
-		}
-
-		return recipes, nil
-	}
-}
-
-// creates url for getting recipes from ingredients list
-func createIngredientsUrlLink(ingredientsList []string, numberOfRecipes int) string {
-	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=f661c070cf4f4ce480a75ff371a12b92&ingredients="
-
-	for _, ingredient := range ingredientsList {
-		url += ingredient + ","
-	}
-
-	url = strings.TrimSuffix(url, ",")
-	url = url + "&number=" + strconv.Itoa(numberOfRecipes)
-
-	return url
 }

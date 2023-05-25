@@ -38,7 +38,7 @@ type WeightPerServing struct {
 	Unit   string  `json:"unit"`
 }
 
-type RecipeDetails struct {
+type RecipeNutrientInfo struct {
 	Nutrients        []Nutrient       `json:"nutrients"`
 	Properties       []Property       `json:"properties"`
 	Flavonoids       []Flavonoid      `json:"flavonoids"`
