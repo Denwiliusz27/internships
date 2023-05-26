@@ -27,8 +27,6 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 
 	// if recipes are in database
 	if len(db_recipes) >= numberOfRecipes {
-		println("-- biore z bazy --")
-
 		for nr := 0; nr < numberOfRecipes; nr++ {
 			recipes = append(recipes, parseRecipeDBToRecipe(db_recipes[nr]))
 		}
@@ -36,8 +34,6 @@ func (rC *RecipesController) GetRecipesByIngredients(ingredientsList []string, n
 		return recipes, nil
 
 	} else { // if recipes are not in database
-		println("--- pobieram nowe -- ")
-
 		url := createIngredientsUrlLink(ingredientsList, numberOfRecipes)
 
 		recipesExtended, err := recipesProxy.GetRecipesInfoByIngredients(url)
@@ -80,7 +76,7 @@ func ConnectToDatabase() *gorm.DB {
 
 // createIngredientsUrlLink creates url link for getting recipes from ingredients list
 func createIngredientsUrlLink(ingredientsList []string, numberOfRecipes int) string {
-	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=f661c070cf4f4ce480a75ff371a12b92&ingredients="
+	url := "https://api.spoonacular.com/recipes/findByIngredients?apiKey=f661c070cf4f4ce480a75ff371a12b92&ranking=1&ingredients="
 
 	for _, ingredient := range ingredientsList {
 		url += ingredient + ","
