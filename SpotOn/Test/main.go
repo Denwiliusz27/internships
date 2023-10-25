@@ -45,7 +45,7 @@ func fanOut[T any](ctx context.Context, trigger <-chan T, receivers ...chan<- T)
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("--- Terimnating FanOut ---")
+			fmt.Println("--- Terminating FanOut ---")
 			return
 
 		case evnt := <-trigger:
